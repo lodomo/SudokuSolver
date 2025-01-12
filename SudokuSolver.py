@@ -31,7 +31,7 @@ class SudokuSolver:
     def __init__(self, board: list):
         self.rows = [set() for _ in range(9)]
         self.cols = [set() for _ in range(9)]
-        self.sqrs = [set() for _ in range(9)]
+        self.boxs = [set() for _ in range(9)]
         self.candidates = [[set() for _ in range(9)] for _ in range(9)]
         self.empty_cells = 81
         self.board = self.list_2D_to_np_array(board)
@@ -53,7 +53,7 @@ class SudokuSolver:
                 else:
                     self.rows[row].add(self.board[row][col])
                     self.cols[col].add(self.board[row][col])
-                    self.sqrs[self.getSquareIndex(row, col)].add(
+                    self.boxs[self.getBoxIndex(row, col)].add(
                         self.board[row][col])
                     self.empty_cells -= 1
         self.updateCandidatesFromSetValues()
@@ -66,10 +66,10 @@ class SudokuSolver:
                         self.default_set
                         - self.rows[row]
                         - self.cols[col]
-                        - self.sqrs[self.getSquareIndex(row, col)]
+                        - self.boxs[self.getBoxIndex(row, col)]
                     )
 
-    def getSquareIndex(self, row, col):
+    def getBoxIndex(self, row, col):
         return (row // 3) * 3 + col // 3
 
     def printPretty(self, board):
@@ -121,59 +121,142 @@ class SudokuSolver:
             print(" ".join(new_line))
         print("".join(["-" for _ in range(73)]))
 
+    def possibleCombinations(self):
+        candidate_count = []
+        for row in range(9):
+            for col in range(9):
+                candidate_count.append(len(self.candidates[row][col]))
+
+        product = 1
+        for candidate in candidate_count:
+            if candidate == 0:
+                continue
+            product *= candidate
+        print(f"Candidate Count: {candidate_count}")
+        print(f"Possible Combinations: {product}")
+        return
 
     def solve(self):
-        """
-        """
+        """ """
         changed = 1
         while changed:
             changed = 0
             changed += self.nakedSingles()
-            self.updateCandidates()
             changed += self.hiddenSingles()
-            self.updateCandidates()
             changed += self.nakedDoubles()
-            self.updateCandidates()
             changed += self.hiddenDoubles()
-            self.updateCandidates()
             changed += self.halfDoubles()
-            self.updateCandidates()
             changed += self.nakedTriples()
-            self.updateCandidates()
             changed += self.hiddenTriples()
-            self.updateCandidates()
             changed += self.blocking()
-            self.updateCandidates()
         pass
 
-    def nakedSingle(self):
-        pass
+    def nakedSingles(self):
+        changed = 0
+        for row in range(9):
+            for col in range(9):
+                if len(self.candidates[row][col]) == 1:
+                    val = self.candidates[row][col].pop()
+                    self.lockValue(val, row, col)
+                    changed += 1
+        return changed
 
-    def hiddenSingle(self):
-        pass
+    def hiddenSingles(self):
+        changed = 0
+        for row in range(9):
+            for col in range(9):
+                changed += self.hiddenSingleRow(row, col)
+                changed += self.hiddenSingleCol(row, col)
 
-    def nakedDouble(self):
-        pass
+        for box in range(9):
+            changed += self.hiddenSingleBox(box)
+        return changed
 
-    def hiddenDouble(self):
-        pass
+    def hiddenSingleRow(self, row_y, col_x):
+        this_set = self.candidates[row_y][col_x]
+        dif_set = set()
+        for col in range(9):
+            if col == col_x:
+                continue
+            dif_set = dif_set.union(self.candidates[row_y][col])
 
-    def halfDouble(self):
-        pass
+        candidate = this_set - dif_set
+        if len(candidate) == 1:
+            candidate = candidate.pop()
+            self.lockValue(candidate, row_y, col_x)
+            return 1
+        return 0
 
-    def nakedTriple(self):
-        pass
+    def hiddenSingleCol(self, row_y, col_x):
+        this_set = self.candidates[row_y][col_x]
+        dif_set = set()
+        for row in range(9):
+            if row == row_y:
+                continue
+            dif_set = dif_set.union(self.candidates[row][col_x])
 
-    def hiddenTriple(self):
-        pass
+        candidate = this_set - dif_set
+        if len(candidate) == 1:
+            candidate = candidate.pop()
+            self.lockValue(candidate, row_y, col_x)
+            return 1
+        return 0
+
+    def hiddenSingleBox(self, box):
+        row0 = (box // 3) * 3
+        col0 = (box % 3) * 3
+
+        for row_y in range(3):
+            for col_x in range(3):
+                row = row0 + row_y
+                col = col0 + col_x
+                this_set = self.candidates[row][col]
+                dif_set = set()
+                for row_a in range(3):
+                    for col_b in range(3):
+                        if row_a == row_y and col_b == col_x:
+                            continue
+                        dif_set = dif_set.union(
+                            self.candidates[row0 + row_a][col0 + col_b]
+                        )
+
+                candidate = this_set - dif_set
+                if len(candidate) == 1:
+                    candidate = candidate.pop()
+                    self.lockValue(candidate, row, col)
+                    return 1
+        return 0
+
+    def nakedDoubles(self):
+        return 0
+
+    def hiddenDoubles(self):
+        return 0
+
+    def halfDoubles(self):
+        return 0
+
+    def nakedTriples(self):
+        return 0
+
+    def hiddenTriples(self):
+        return 0
 
     def blocking(self):
-        pass
+        return 0
+
+    def lockValue(self, val, row, col):
+        self.board[row][col] = val
+        self.rows[row].add(val)
+        self.cols[col].add(val)
+        self.boxs[self.getBoxIndex(row, col)].add(val)
+        self.empty_cells -= 1
+        self.candidates[row][col] = set()
+        self.updateCandidatesFromSetValues()
 
 
 if __name__ == "__main__":
     board = sys.stdin.read()
-    # Turn the board into a list of lists of chars, remove the newline characters
     board = [list(row.strip()) for row in board.split("\n")]
     if board[-1] == []:
         board.pop()
@@ -182,63 +265,14 @@ if __name__ == "__main__":
     solver = SudokuSolver(board)
     solver.printPretty(solver.board)
     solver.printCandidates()
+    solver.possibleCombinations()
+    solver.solve()
+    solver.printPretty(solver.board)
+    solver.printCandidates()
+    solver.possibleCombinations()
 
 
 """
-import numpy as np
-
-    def soloCandidate(self):
-        for row in range(9):
-            for col in range(9):
-                if self.board[row][col]:
-                    continue
-
-                if len(self.candidates[row][col]) == 1:
-                    val = self.candidates[row][col].pop()
-                    self.setSquare(val, row, col)
-
-    def horizontalDiffs(self, row_y, col_x):
-        this_set = self.candidates[row_y][col_x]
-        dif_set = set()
-        for col in range(9):
-            if col == col_x:
-                continue
-            dif_set = dif_set.union(self.candidates[row_y][col])
-        return this_set - dif_set
-
-    def verticalDiffs(self, row_y, col_x):
-        this_set = self.candidates[row_y][col_x]
-        dif_set = set()
-        for row in range(9):
-            if row == row_y:
-                continue
-            dif_set = dif_set.union(self.candidates[row][col_x])
-        return this_set - dif_set
-
-    def setSquare(self, val, row, col):
-        self.board[row][col] = val
-        self.rows[row].add(val)
-        self.cols[col].add(val)
-        self.sqrs[self.getSquare(row, col)].add(val)
-        self.empty_cells -= 1
-        self.candidates[row][col] = set()
-
-    def horizontalHiddenSingles(self):
-        for col1 in range(9):
-            for row in range(9):
-                diff = self.horizontalDiffs(row, col1)
-                if len(diff) == 1:
-                    val = diff.pop()
-                    self.setSquare(val, row, col1)
-
-    def verticalHiddenSingles(self):
-        for row1 in range(9):
-            for col in range(9):
-                diff = self.verticalDiffs(row1, col)
-                if len(diff) == 1:
-                    val = diff.pop()
-                    self.setSquare(val, row1, col)
-
     def isSameBoard(self, board1, board2):
         for i in range(9):
             for j in range(9):
