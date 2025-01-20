@@ -83,10 +83,11 @@ class SudokuSolver:
         self.rows = [Cluster() for _ in range(9)]
         self.cols = [Cluster() for _ in range(9)]
         self.boxs = [Cluster() for _ in range(9)]
+        self.solved = 0
 
         for row in range(9):
             for col in range(9):
-                if board[row][col] != ".":
+                if board[row][col] != "." and board[row][col] != 0:
                     self.board[row][col].setVal(int(board[row][col]))
 
                 self.rows[row].addCell(self.board[row][col])
@@ -103,6 +104,12 @@ class SudokuSolver:
         for row in self.rows:
             string.append(str(row))
         return "\n".join(string)
+
+    def boardToList(self):
+        board = []
+        for row in self.board:
+            board.append([cell.value for cell in row])
+        return board
 
     def getBox(self, row, col):
         return (row // 3) * 3 + col // 3
@@ -163,19 +170,65 @@ class SudokuSolver:
                 changed = 1
                 continue
 
-        return self.board
+        solved_cells = 0
+        for row in self.board:
+            for cell in row:
+                if cell.value:
+                    solved_cells += 1
+        print(f"Solved {solved_cells} cells")
+        if solved_cells == 81:
+            return 1
+
+        empty_candidate_cells = 0
+        for row in self.board:
+            for cell in row:
+                if not cell.value and not cell.candidates:
+                    empty_candidate_cells += 1
+        if empty_candidate_cells:
+            print(f"Empty candidate cells: {empty_candidate_cells}")
+            return -1
+
+        self.printCandidates()
+        print("Time To DFS Guess")
+        cell = self.firstUnsolvedCell()
+
+        for candidate in self.board[cell[0]][cell[1]].candidates:
+            print(f"Trying {candidate} at {cell}")
+            board_copy = self.boardToList()
+            board_copy[cell[0]][cell[1]] = candidate
+            solver = SudokuSolver(board_copy)
+            solver.printPretty()
+            if solver.solve() == -1:
+                print(f"Failed with {candidate} at {cell}")
+                continue
+
+            self.board = solver.board
+
+        return 1
+
+    def printPretty(self):
+        for row in self.board:
+            for cell in row:
+                print(cell, end=" ")
+            print()
+
+    def firstUnsolvedCell(self):
+        for row in range(9):
+            for col in range(9):
+                if not self.board[row][col].value:
+                    return (row, col)
 
     def remainingCombinations(self):
         combos = 1
-        for row in self.rows:
-            for cell in row.cells:
-                if cell.value:
-                    continue
-                combos *= len(cell.candidates)
+        for row in self.board:
+            for cell in row:
+                if not cell.value:
+                    combos *= len(cell.candidates)
         return combos
 
     def setCell(self, val, cell):
         cell.setVal(val)
+        self.solved += 1
         self.rows[cell.row].updateCandidates()
         self.cols[cell.col].updateCandidates()
         self.boxs[cell.box].updateCandidates()
@@ -270,4 +323,3 @@ if __name__ == "__main__":
     solver.solve()
     solver.printCandidates()
     print("Remaining combinations:", solver.remainingCombinations())
-
