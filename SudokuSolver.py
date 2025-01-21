@@ -1,13 +1,41 @@
 import sys
 
 
+class Verbose:
+    verbose = False
+
+    def turn_on(self):
+        Verbose.verbose = True
+
+    def print(self, *args):
+        if Verbose.verbose:
+            print(*args)
+
+
 class Cell:
-    def __init__(self, row=-1, col=-1):
+    """
+    Contains all the logic for a single cell in the Sudoku Board.
+    All rows, columns, and boxes are 0-indexed.
+
+    row:        The row of the cell
+    col:        The column of the cell
+    box:        The box of the cell (0 being the top left, 8 being the bottom right)
+    candidates: A set of all possible values the cell could be.
+    value:      The value of the cell. 0 if the cell is empty.
+    marked:     A boolean value to determine if the cell has been marked for an operation.
+
+    eliminateCandidates:    Removes candidates from the cell that are in the anti_set
+    guaranteeCandidates:    Removes candidates from the cell that are not in the pro_set
+    setVal:                 Sets the value of the cell to val
+    """
+
+    def __init__(self, row: int = -1, col: int = -1):
         self.row = row
         self.col = col
         self.box = (row // 3) * 3 + col // 3
         self.candidates = {1, 2, 3, 4, 5, 6, 7, 8, 9}
         self.value = 0
+        self.marked = False
 
     def __str__(self):
         return f"{self.value}"
@@ -15,26 +43,36 @@ class Cell:
     def __repr__(self):
         return f"{self.value}"
 
-    def setVal(self, val):
+    def setVal(self, val) -> None:
+        """
+        Sets the value of the cell to val
+        Removes all candidates from the cell
+        Returns nothing
+        """
         self.value = val
         self.candidates = set()
+        return
 
-    def eliminateCandidates(self, anti_set):
+    def eliminateCandidates(self, anti_set: set) -> int:
+        """
+        Removes candidates from the cell that are in the anti_set
+        Returns 1 if the candidates were changed, 0 if not
+        """
         if self.value:
             return 0
 
-        if self.candidates == anti_set:
+        temp = self.candidates.copy()
+        self.candidates -= anti_set
+        if self.candidates == temp:
             return 0
 
-        temp = self.candidates.copy()
+        return 1
 
-        self.candidates -= anti_set
-
-        if self.candidates != temp:
-            return 1
-        return 0
-
-    def guaranteeCandidates(self, pro_set):
+    def guaranteeCandidates(self, pro_set: set) -> int:
+        """
+        Removes candidates from the cell that are not in the pro_set
+        Returns 1 if the candidates were changed, 0 if not
+        """
         if self.value:
             return
 
@@ -43,12 +81,25 @@ class Cell:
         # & is the intersection operator
         self.candidates &= pro_set
 
-        if self.candidates != temp:
-            return 1
-        return 0
+        if self.candidates == temp:
+            return 0
+        return 1
 
 
 class Cluster:
+    """
+    Contains all the logic for a row, column or box in the Sudoku Board.
+    Each cluster should have references to all the cells in the cluster.
+    When a cell is modified, it should be updated in ALL 3 clusters it belongs
+    to.
+
+    cells:  A list of all the cells in the cluster
+    values: A set of all the values in the cluster
+
+    addCell:                Adds a cell to the cluster
+    setCell:                Sets the value of the cell at cell_idx to val
+    """
+
     def __init__(self):
         self.cells = []
         self.values = set()
@@ -62,12 +113,44 @@ class Cluster:
     def __repr__(self):
         return self.__str__()
 
-    def addCell(self, cell):
+    def addCell(self, cell: Cell) -> None:
+        """
+        Adds a cell to the cluster
+        Updates the values set with the value of the cell
+
+        *** DOES NOT UPDATE CANDIDATES ***
+        """
         self.cells.append(cell)
         if cell.value:
             self.values.add(cell.value)
 
-    def updateCandidates(self):
+    def setCell(self, val: int, cell_idx: int):
+        """
+        Sets the value of the cell at cell_idx to val
+        Updates the candidates of all cells in the cluster
+        Returns True if the remaining candidates are valid, False if not
+        """
+        self.raiseIfAlreadyInCluster(val)
+
+        self.cells[cell_idx].setVal(val)
+        self.updateCandidates()
+
+        self.raiseIfEmptyCandidates()
+        return
+
+    def initializeCandidates(self) -> None:
+        """
+        Initializes the candidates of all cells in the cluster
+        This assumes that all cells have been added to the cluster
+        """
+        for cell in self.cells:
+            cell.eliminateCandidates(self.values)
+
+    def updateCandidates(self) -> None:
+        """
+        Makes sure that all cell values have been added to the values set
+        Eliminates all candidates that are in the values set
+        """
         for cell in self.cells:
             if cell.value not in self.values:
                 self.values.add(cell.value)
@@ -75,8 +158,41 @@ class Cluster:
         for cell in self.cells:
             cell.eliminateCandidates(self.values)
 
+    def raiseIfAlreadyInCluster(self, val: int) -> None:
+        """
+        Raises a ValueError if the value is already in the cluster
+        """
+        if val in self.values:
+            raise ValueError("Value already in cluster")
+
+    def raiseIfEmptyCandidates(self):
+        """
+        Validates that all cells in the cluster have valid candidates
+        Returns True if all non-solved cells have candidates, False if not
+        """
+        for cell in self.cells:
+            if not cell.value and not cell.candidates:
+                raise ValueError("Invalid board")
+
 
 class SudokuSolver:
+    """
+    Contains all the logic for solving a Sudoku board.
+
+    board:      A 9x9 list of Cell objects
+    rows:       A list of 9 Cluster objects representing the rows
+    cols:       A list of 9 Cluster objects representing the columns
+    boxs:       A list of 9 Cluster objects representing the boxes
+
+    populateData:           Populates the board with the given board
+    initializeCandidates:   Initializes the candidates of all cells in the board
+    boardToList:            Converts the board to a 9x9 list of integers
+    getBox:                 Returns the box of the cell at (row, col)
+    printCandidates:        Prints the candidates of all cells in the board
+    solve:                  Solves the board
+    printPretty:            Prints the board in a readable format (not candidates)
+    """
+
     def __init__(self, board: list):
         self.board = [[Cell(i, j) for j in range(9)] for i in range(9)]
 
@@ -85,6 +201,16 @@ class SudokuSolver:
         self.boxs = [Cluster() for _ in range(9)]
         self.solved = 0
 
+        self.populateData(board)
+        self.initializeCandidates()
+
+    def __str__(self):
+        string = []
+        for row in self.rows:
+            string.append(str(row))
+        return "\n".join(string)
+
+    def populateData(self, board) -> None:
         for row in range(9):
             for col in range(9):
                 if board[row][col] != "." and board[row][col] != 0:
@@ -93,17 +219,15 @@ class SudokuSolver:
                 self.rows[row].addCell(self.board[row][col])
                 self.cols[col].addCell(self.board[row][col])
                 self.boxs[self.getBox(row, col)].addCell(self.board[row][col])
+        return
 
-        for i in range(9):
-            self.rows[i].updateCandidates()
-            self.cols[i].updateCandidates()
-            self.boxs[i].updateCandidates()
-
-    def __str__(self):
-        string = []
+    def initializeCandidates(self):
         for row in self.rows:
-            string.append(str(row))
-        return "\n".join(string)
+            row.initializeCandidates()
+        for col in self.cols:
+            col.initializeCandidates()
+        for box in self.boxs:
+            box.initializeCandidates()
 
     def boardToList(self):
         board = []
@@ -151,22 +275,18 @@ class SudokuSolver:
         while changed:
             changed = 0
             if self.nakedSingles():
-                print("Found naked singles")
                 changed = 1
                 continue
 
             if self.funcToAllClusters(self.hiddenSingle):
-                print("Found hidden singles")
                 changed = 1
                 continue
 
             if self.funcToAllClusters(self.nakedDouble):
-                print("Found naked doubles")
                 changed = 1
                 continue
 
             if self.funcToAllClusters(self.hiddenDouble):
-                print("Found hidden doubles")
                 changed = 1
                 continue
 
@@ -189,15 +309,14 @@ class SudokuSolver:
             return -1
 
         self.printCandidates()
-        print("Time To DFS Guess")
         cell = self.firstUnsolvedCell()
 
         for candidate in self.board[cell[0]][cell[1]].candidates:
             print(f"Trying {candidate} at {cell}")
+            print("Remaining Combinations:", self.remainingCombinations())
             board_copy = self.boardToList()
             board_copy[cell[0]][cell[1]] = candidate
             solver = SudokuSolver(board_copy)
-            solver.printPretty()
             if solver.solve() == -1:
                 print(f"Failed with {candidate} at {cell}")
                 continue
@@ -226,12 +345,20 @@ class SudokuSolver:
                     combos *= len(cell.candidates)
         return combos
 
-    def setCell(self, val, cell):
+    def setCell(self, val, cell) -> bool:
+        """
+        Sets the value of the cell to val
+        Updates the candidates of all cells in the cluster
+        Returns True if the remaining candidates are valid, False if not
+        """
         cell.setVal(val)
-        self.solved += 1
-        self.rows[cell.row].updateCandidates()
-        self.cols[cell.col].updateCandidates()
-        self.boxs[cell.box].updateCandidates()
+        if (
+            self.rows[cell.row].updateCandidates()
+            and self.cols[cell.col].updateCandidates()
+            and self.boxs[cell.box].updateCandidates()
+        ):
+            return True
+        return False
 
     def funcToAllClusters(self, func):
         count = 0
@@ -243,17 +370,17 @@ class SudokuSolver:
             count += func(box)
         return count
 
-    def nakedSingles(self):
-        changed = 0
+    def nakedSingles(self) -> int:
+        changed = False
         for row in self.rows:
             for cell in row.cells:
                 if len(cell.candidates) == 1:
-                    self.setCell(cell.candidates.pop(), cell)
-                    changed += 1
+                    if self.setCell(cell.candidates.pop(), cell):
+                        changed = True
         return changed
 
     def hiddenSingle(self, cluster):
-        count = 0
+        changed = False
         for cell in cluster.cells:
             if cell.value:
                 continue
@@ -267,9 +394,9 @@ class SudokuSolver:
 
             candidate = this_set - dif_set
             if len(candidate) == 1:
-                self.setCell(candidate.pop(), cell)
-                count += 1
-        return count
+                if self.setCell(candidate.pop(), cell):
+                    changed = True
+        return changed
 
     def nakedDouble(self, cluster):
         count = 0
@@ -305,21 +432,23 @@ class SudokuSolver:
                 if cand_map[key] == cand_map[key2]:
                     for i in range(9):
                         if i not in cand_map[key]:
-                            count += cluster.cells[i].eliminateCandidates(
-                                {key, key2})
+                            count += cluster.cells[i].eliminateCandidates({key, key2})
                         else:
-                            count += cluster.cells[i].guaranteeCandidates(
-                                {key, key2})
+                            count += cluster.cells[i].guaranteeCandidates({key, key2})
 
         return count
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "-v":
+        Verbose().turn_on()
+        print("Verbose mode turned on")
+
     board = sys.stdin.read()
     board = [list(row.strip()) for row in board.split("\n")]
     if board[-1] == []:
         board.pop()
     solver = SudokuSolver(board)
-    solver.solve()
+    # solver.solve()
     solver.printCandidates()
     print("Remaining combinations:", solver.remainingCombinations())
