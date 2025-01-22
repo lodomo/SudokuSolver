@@ -1,6 +1,3 @@
-import sys
-
-
 class Cell:
     def __init__(self, row: int = -1, col: int = -1, value: int = 0):
         self.row = row
@@ -425,15 +422,18 @@ class SudokuSolver:
         return -1
 
 
-if __name__ == "__main__":
-    board = sys.stdin.read()
-    board = [list(row.strip()) for row in board.split("\n")]
-    if board[-1] == []:
-        board.pop()
-    solver_board = Board(board, raw_data=True)
-    board = solver_board.as_data()
-    solver = SudokuSolver(board)
-    solver.board.printPretty()
-    solver.solve()
-    print()
-    solver.board.printPretty()
+
+class Solution:
+    def solveSudoku(self, board: List[List[str]]) -> None:
+        """
+        Do not return anything, modify board in-place instead.
+        """
+        solver_board = Board(board, raw_data=True)
+        board_formatted = solver_board.as_data()
+        solver = SudokuSolver(board_formatted)
+        solver.solve()
+        board_solved = solver.board.as_data()
+
+        for i in range(9):
+            for j in range(9):
+                board[i][j] = str(board_solved[i][j])
