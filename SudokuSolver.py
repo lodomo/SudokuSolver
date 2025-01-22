@@ -55,7 +55,7 @@ class Cell:
         self.validate()
         return abs(len(self.candidates) - len(current_candidates))
 
-    def guarantee_candidate(self, pro_set: set) -> int:
+    def guarantee_candidates(self, pro_set: set) -> int:
         """
         Removes candidates from the cell that are not in the pro_set
         Returns 1 if the candidates were changed, 0 if not
@@ -117,29 +117,23 @@ class Cluster:
             self.update_candidates()
         return
 
-    def set_cell(self, val: int, cell: Cell) -> None:
-        """
-        Sets the value of the cell to val
-        Updates the candidates of all cells in the cluster
-
-        Raises a ValueError if the value is already in the cluster
-        Raises a ValueError if another cell in the cluster has no candidates
-        """
-        if val in self.values:
-            raise ValueError(f"Value {val} already in cluster")
-
-        cell.set_val(val)
-        self.update_candidates()
-        return
-
     def update_candidates(self) -> None:
         """
         Makes sure that all cell values have been added to the values set
         Eliminates all candidates that are in the values set
         """
+        dup_check = set()
         for cell in self.cells:
+            if not cell.value:
+                continue
+
             if cell.value not in self.values:
                 self.values.add(cell.value)
+
+            if cell.value not in dup_check:
+                dup_check.add(cell.value)
+            else:
+                raise ValueError(f"Duplicate value {cell.value} in cluster")
 
         for cell in self.cells:
             cell.remove_candidates(self.values)
@@ -165,6 +159,15 @@ class Board:
                     data[row][col] = 0
                 else:
                     data[row][col] = int(data[row][col])
+
+    def as_data(self):
+        data = []
+        for row in self.cells:
+            row_data = []
+            for cell in row:
+                row_data.append(cell.value)
+            data.append(row_data)
+        return data
 
     def populateData(self, board) -> None:
         for row in range(9):
@@ -216,6 +219,211 @@ class Board:
             print(" ".join(new_line))
         print("".join(["-" for _ in range(73)]))
 
+    def set_cell(self, val, cell):
+        cell.set_val(val)
+        self.update_candidates(cell)
+        return
+
+    def update_candidates(self, cell: Cell) -> None:
+        self.rows[cell.row].update_candidates()
+        self.cols[cell.col].update_candidates()
+        self.boxs[cell.box].update_candidates()
+
+
+class SudokuSolver:
+    def __init__(self, data: list):
+        self.board = Board(data)
+
+    def solve(self):
+        try:
+            return self.__solve()
+        except ValueError:
+            return -1
+
+    def __solve(self):
+        changed = 1
+        while changed:
+            changed = 0
+            changed += self.naked_singles()
+            if changed:
+                continue
+
+            changed += self.funcToAllClusters(self.hiddenSingle)
+            if changed:
+                continue
+
+            changed += self.funcToAllClusters(self.nakedDouble)
+            if changed:
+                continue
+
+            changed += self.funcToAllClusters(self.hiddenDouble)
+            if changed:
+                continue
+
+        if self.is_solved():
+            return 1
+
+        return self.dfs()
+
+    def is_solved(self):
+        solved_cells = 0
+        for row in self.board.cells:
+            for cell in row:
+                if cell.value:
+                    solved_cells += 1
+        if solved_cells == 81:
+            return True
+        return False
+
+    def naked_singles(self):
+        changed = 0
+        for row in self.board.cells:
+            for cell in row:
+                if len(cell.candidates) == 1:
+                    self.board.set_cell(cell.candidates.pop(), cell)
+                    changed += 1
+        return changed
+
+    def hiddenSingle(self, cluster):
+        """
+        Hidden single is when a cell doesn't have a value, but it has the only
+        instance of that candidate in the cluster.
+
+        Example: (1, 2, 3), (2, 3), and (2, 3) are the last 3 cells in a row.
+        The first cell MUST be a 1.
+        """
+        changed = False
+        for cell in cluster.cells:
+            if cell.value:
+                continue
+
+            this_set = cell.candidates
+            dif_set = set()
+            for other_cell in cluster.cells:
+                if other_cell == cell:
+                    continue
+                dif_set = dif_set.union(other_cell.candidates)
+
+            candidate = this_set - dif_set
+            if len(candidate) == 1:
+                if self.board.set_cell(candidate.pop(), cell):
+                    changed = True
+        return changed
+
+    def nakedDouble(self, cluster):
+        """
+        Similar to a naked single but a little trickier.
+        When two cells have 2 candidates that are identical, no other cells
+        in that cluster can contain those numbers. We can actually use
+        the example from hidden single to also deduce the 1.
+
+        Example: (1, 2, 3), (2, 3), and (2, 3) are the last 3 cells in a row.
+        This means the first cell cannot have a 2, or 3 in it because the
+        second and third cell must be 2 or 3.
+        """
+        count = 0
+        for i in range(9):
+            if len(cluster.cells[i].candidates) == 2:
+                for j in range(i + 1, 9):
+                    if cluster.cells[i].candidates == cluster.cells[j].candidates:
+                        for k in range(9):
+                            if k == i or k == j:
+                                continue
+                            count += cluster.cells[k].remove_candidates(
+                                cluster.cells[i].candidates
+                            )
+        return count
+
+    def hiddenDouble(self, cluster):
+        """
+        If two cells are the only two cells to contain those numbers in a cluster,
+        it's a hidden double.
+
+        Example: (1, 5, 3, 6), (1, 5, 3), (1, 3, 4, 5, 8), (3, 4, 5, 6, 8)
+        The last two cells are the only ones with 4 and 8, those cells must be
+        4 or 8, so it becomes
+
+        (1, 5, 3, 6), (1, 5, 3), (4, 8), (4, 8)
+        """
+        count = 0
+        cand_map = {}
+        for i in range(9):
+            for candidate in cluster.cells[i].candidates:
+                if candidate not in cand_map:
+                    cand_map[candidate] = []
+                cand_map[candidate].append(i)
+
+        for key in list(cand_map.keys()):
+            if len(cand_map[key]) != 2:
+                cand_map.pop(key)
+
+        for key in cand_map:
+            for key2 in cand_map:
+                if key == key2:
+                    continue
+                if cand_map[key] == cand_map[key2]:
+                    for i in range(9):
+                        if i in cand_map[key]:
+                            count += cluster.cells[i].guarantee_candidates({key, key2})
+
+        return count
+
+    def funcToAllClusters(self, func):
+        """
+        This runs a function to all clusters on the board.
+
+        It does not catch any errors, errors are to be caught by solve method.
+        """
+        count = 0
+        for row in self.board.rows:
+            count += func(row)
+        for col in self.board.cols:
+            count += func(col)
+        for box in self.board.boxs:
+            count += func(box)
+        return count
+
+    def remainingCombinations(self):
+        """
+        Purely for debugging and fun.
+        Shows the product of all the remaining candidates of the board.
+        """
+        combos = 1
+        for row in self.board:
+            for cell in row:
+                if not cell.value:
+                    combos *= len(cell.candidates)
+        return combos
+
+    def cell_with_fewest_candidates(self):
+        """
+        Returns the cell with the fewest candidates.
+        """
+        min_cell = None
+        min_candidates = 10
+        for row in self.board.cells:
+            for cell in row:
+                if not cell.value and len(cell.candidates) < min_candidates:
+                    min_cell = cell
+                    min_candidates = len(cell.candidates)
+        return min_cell
+
+
+    def dfs(self):
+        """
+        Time to brute force the solution.
+        """
+        cell = self.cell_with_fewest_candidates()
+        for candidate in cell.candidates:
+            board_copy = self.board.as_data()
+            board_copy[cell.row][cell.col] = candidate
+            solver = SudokuSolver(board_copy)
+            if solver.solve() == -1:
+                continue
+            self.board = solver.board
+            return 1
+        return -1
+
 
 if __name__ == "__main__":
     board = sys.stdin.read()
@@ -223,12 +431,12 @@ if __name__ == "__main__":
     if board[-1] == []:
         board.pop()
     solver_board = Board(board, raw_data=True)
-    solver_board.printPretty()
-    solver_board.printCandidates()
-    # solver = SudokuSolver(board)
-    # solver.solve()
-    # solver.printCandidates()
-    # print("Remaining combinations:", solver.remainingCombinations())
+    board = solver_board.as_data()
+    solver = SudokuSolver(board)
+    solver.board.printPretty()
+    solver.solve()
+    print()
+    solver.board.printPretty()
 
 '''
 
@@ -343,16 +551,6 @@ class SudokuSolver:
 
         return 1
 
-    def printPretty(self):
-        """
-        Prints the board in a readable format (no candidates)
-        9x9 grid of numbers.
-        """
-        for row in self.board:
-            for cell in row:
-                print(cell, end=" ")
-            print()
-
     def firstUnsolvedCell(self):
         """
         Finds the first unsolved cell in the board in row major order.
@@ -364,147 +562,10 @@ class SudokuSolver:
                 if not self.board[row][col].value:
                     return (row, col)
 
-    def remainingCombinations(self):
-        """
-        Purely for debugging and fun.
-        Shows the product of all the remaining candidates of the board.
-        """
-        combos = 1
-        for row in self.board:
-            for cell in row:
-                if not cell.value:
-                    combos *= len(cell.candidates)
-        return combos
 
-    def setCell(self, val, cell):
-        """
-        Sets the value of the cell to val
-        Updates the candidates of all cells in the cluster
-        Returns True if the remaining candidates are valid, False if not
 
-        Note: This method might throw an error if the value is already in the cluster.
-        Note: This method might throw an error if there is now a totall empty cell.
 
-        This error will be resolved in the "solve" method.
-        """
-        cell.setVal(val)
-        self.rows[cell.row].updateCandidates()
-        self.cols[cell.col].updateCandidates()
-        self.boxs[cell.box].updateCandidates()
-        return
 
-    def funcToAllClusters(self, func):
-        """
-        This runs a function to all clusters on the board.
 
-        It does not catch any errors, errors are to be caught by solve method.
-        """
-        count = 0
-        for row in self.rows:
-            count += func(row)
-        for col in self.cols:
-            count += func(col)
-        for box in self.boxs:
-            count += func(box)
-        return count
 
-    def nakedSingles(self) -> int:
-        """
-        A naked single is when a cell doesn't have a value, but it has a single
-        candidate.
-
-        It does not catch errors from "setCell" that happens in the solve method.
-        """
-        changed = False
-        for row in self.rows:
-            for cell in row.cells:
-                if len(cell.candidates) == 1:
-                    if self.setCell(cell.candidates.pop(), cell):
-                        changed = True
-        return changed
-
-    def hiddenSingle(self, cluster):
-        """
-        Hidden single is when a cell doesn't have a value, but it has the only
-        instance of that candidate in the cluster.
-
-        Example: (1, 2, 3), (2, 3), and (2, 3) are the last 3 cells in a row.
-        The first cell MUST be a 1.
-        """
-        changed = False
-        for cell in cluster.cells:
-            if cell.value:
-                continue
-
-            this_set = cell.candidates
-            dif_set = set()
-            for other_cell in cluster.cells:
-                if other_cell == cell:
-                    continue
-                dif_set = dif_set.union(other_cell.candidates)
-
-            candidate = this_set - dif_set
-            if len(candidate) == 1:
-                if self.setCell(candidate.pop(), cell):
-                    changed = True
-        return changed
-
-    def nakedDouble(self, cluster):
-        """
-        Similar to a naked single but a little trickier.
-        When two cells have 2 candidates that are identical, no other cells
-        in that cluster can contain those numbers. We can actually use
-        the example from hidden single to also deduce the 1.
-
-        Example: (1, 2, 3), (2, 3), and (2, 3) are the last 3 cells in a row.
-        This means the first cell cannot have a 2, or 3 in it because the
-        second and third cell must be 2 or 3.
-        """
-        count = 0
-        for i in range(9):
-            if len(cluster.cells[i].candidates) == 2:
-                for j in range(i + 1, 9):
-                    if cluster.cells[i].candidates == cluster.cells[j].candidates:
-                        for k in range(9):
-                            if k == i or k == j:
-                                continue
-                            count += cluster.cells[k].eliminateCandidates(
-                                cluster.cells[i].candidates
-                            )
-        return count
-
-    def hiddenDouble(self, cluster):
-        """
-        If two cells are the only two cells to contain those numbers in a cluster,
-        it's a hidden double.
-
-        Example: (1, 5, 3, 6), (1, 5, 3), (1, 3, 4, 5, 8), (3, 4, 5, 6, 8)
-        The last two cells are the only ones with 4 and 8, those cells must be
-        4 or 8, so it becomes
-
-        (1, 5, 3, 6), (1, 5, 3), (4, 8), (4, 8)
-        """
-        count = 0
-        cand_map = {}
-        for i in range(9):
-            for candidate in cluster.cells[i].candidates:
-                if candidate not in cand_map:
-                    cand_map[candidate] = []
-                cand_map[candidate].append(i)
-
-        for key in list(cand_map.keys()):
-            if len(cand_map[key]) != 2:
-                cand_map.pop(key)
-
-        for key in cand_map:
-            for key2 in cand_map:
-                if key == key2:
-                    continue
-                if cand_map[key] == cand_map[key2]:
-                    for i in range(9):
-                        if i in cand_map[key]:
-                            count += cluster.cells[i].guaranteeCandidates(
-                                {key, key2})
-
-        return count
 '''
